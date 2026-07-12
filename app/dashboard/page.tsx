@@ -1,0 +1,303 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import {
+  TrendingUp, Check, ArrowUp, ArrowDown, Play, Upload,
+  Sparkles, X, Eye, Music2, Video, RefreshCw, CheckCircle2, Clock
+} from "lucide-react";
+import type { Candidate, PublishedVideo } from "@/lib/store";
+
+const SOURCE_STYLE = {
+  tiktok: { label: "TikTok", icon: Music2, cls: "text-rose-400 bg-rose-500/10 border-rose-500/30" },
+  reels: { label: "Reels", icon: Video, cls: "text-violet-400 bg-violet-500/10 border-violet-500/30" },
+};
+
+const RANK_BADGE = [
+  "bg-gradient-to-br from-amber-300 to-amber-600 text-amber-950",
+  "bg-gradient-to-br from-zinc-300 to-zinc-500 text-zinc-900",
+  "bg-gradient-to-br from-orange-400 to-orange-700 text-orange-950",
+  "bg-zinc-800 text-zinc-300 border border-zinc-700",
+  "bg-zinc-800 text-zinc-300 border border-zinc-700",
+  "bg-zinc-800 text-zinc-300 border border-zinc-700",
+];
+
+export default function DashboardPage() {
+  const [tab, setTab] = useState<"collect" | "review" | "publish">("collect");
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [picked, setPicked] = useState<Candidate[]>([]);
+  const [title, setTitle] = useState("역대급 파쿠르 실패 반응 랭킹 TOP6");
+  const [renderState, setRenderState] = useState<"idle" | "rendering" | "done">("idle");
+  const [progress, setProgress] = useState(0);
+  const [published, setPublished] = useState<PublishedVideo[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadCandidates = async () => {
+    setLoading(true);
+    const res = await fetch("/api/candidates");
+    setCandidates(await res.json());
+    setLoading(false);
+  };
+
+  const loadPublished = async () => {
+    const res = await fetch("/api/videos");
+    setPublished(await res.json());
+  };
+
+  useEffect(() => {
+    loadCandidates();
+    loadPublished();
+  }, []);
+
+  const togglePick = (clip: Candidate) => {
+    setPicked((prev) => {
+      const exists = prev.find((p) => p.id === clip.id);
+      if (exists) return prev.filter((p) => p.id !== clip.id);
+      if (prev.length >= 6) return prev;
+      return [...prev, clip];
+    });
+  };
+
+  const move = (idx: number, dir: number) => {
+    setPicked((prev) => {
+      const next = [...prev];
+      const swap = idx + dir;
+      if (swap < 0 || swap >= next.length) return prev;
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      return next;
+    });
+  };
+
+  const startRender = async () => {
+    setRenderState("rendering");
+    setProgress(0);
+    const interval = setInterval(() => {
+      setProgress((p) => Math.min(95, p + Math.random() * 15 + 5));
+    }, 400);
+
+    const res = await fetch("/api/render", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, clipIds: picked.map((p) => p.id) }),
+    });
+    await res.json();
+
+    clearInterval(interval);
+    setProgress(100);
+    setRenderState("done");
+    loadPublished();
+  };
+
+  const publish = async (id: number) => {
+    await fetch("/api/videos", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    loadPublished();
+  };
+
+  const reset = () => {
+    setPicked([]);
+    setRenderState("idle");
+    setProgress(0);
+    setTab("collect");
+  };
+
+  return (
+    <div className="min-h-screen bg-zinc-950 text-zinc-50 flex justify-center">
+      <div className="w-full max-w-sm min-h-screen bg-zinc-950 border-x border-zinc-900 flex flex-col">
+        <div className="px-5 pt-6 pb-4 border-b border-zinc-900">
+          <div className="flex items-center gap-2 text-amber-400 text-xs font-bold tracking-widest uppercase">
+            <TrendingUp size={14} strokeWidth={2.5} />
+            도랭킹 팩토리
+          </div>
+          <h1 className="text-xl font-extrabold tracking-tight mt-1">
+            소재수집 → 편집 → 발행
+          </h1>
+        </div>
+
+        <div className="flex px-5 gap-1 pt-3">
+          {[
+            { id: "collect" as const, label: "1. 소재수집", badge: candidates.length },
+            { id: "review" as const, label: "2. 검토·편집", badge: picked.length || null },
+            { id: "publish" as const, label: "3. 발행현황", badge: published.length || null },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className={`flex-1 text-[11px] font-bold py-2.5 rounded-lg border transition-colors ${
+                tab === t.id
+                  ? "bg-amber-400 text-zinc-950 border-amber-400"
+                  : "bg-zinc-900 text-zinc-400 border-zinc-800"
+              }`}
+            >
+              {t.label}
+              {t.badge ? (
+                <span className={`ml-1 ${tab === t.id ? "text-zinc-900" : "text-amber-400"}`}>
+                  ({t.badge})
+                </span>
+              ) : null}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 px-5 py-5">
+          {tab === "collect" && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
+                <span>{loading ? "불러오는 중..." : "봇이 찾은 후보 클립"}</span>
+                <button onClick={loadCandidates} className="flex items-center gap-1 text-amber-400">
+                  <RefreshCw size={12} /> 새로고침
+                </button>
+              </div>
+              {candidates.map((c) => {
+                const picked_ = picked.find((p) => p.id === c.id);
+                const S = SOURCE_STYLE[c.source];
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => togglePick(c)}
+                    className={`w-full text-left rounded-xl border overflow-hidden transition-all ${
+                      picked_ ? "border-amber-400" : "border-zinc-800"
+                    }`}
+                  >
+                    <div className={`h-24 bg-gradient-to-br ${c.thumbHue} relative flex items-end p-3`}>
+                      <div className={`absolute top-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 ${S.cls}`}>
+                        <S.icon size={10} /> {S.label}
+                      </div>
+                      {picked_ && (
+                        <div className="absolute top-2 right-2 bg-amber-400 text-zinc-950 rounded-full p-1">
+                          <Check size={12} strokeWidth={3} />
+                        </div>
+                      )}
+                      <span className="text-sm font-bold text-white drop-shadow">{c.topic}</span>
+                    </div>
+                    <div className="flex items-center justify-between px-3 py-2 bg-zinc-900">
+                      <span className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
+                        <Eye size={12} /> {c.views}
+                      </span>
+                      <span className="text-[11px] text-zinc-500">
+                        {picked_ ? "후보에 담김" : "탭해서 담기"}
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+              <button
+                onClick={() => setTab("review")}
+                disabled={picked.length === 0}
+                className="w-full mt-2 py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-600"
+              >
+                검토·편집으로 ({picked.length}개 담음)
+              </button>
+            </div>
+          )}
+
+          {tab === "review" && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs text-zinc-500 flex items-center gap-1 mb-1.5">
+                  <Sparkles size={12} className="text-amber-400" /> AI가 뽑은 제목 (수정 가능)
+                </label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <div className="text-xs text-zinc-500 mb-2">순위 순서 (위/아래로 조정)</div>
+                <div className="space-y-2">
+                  {picked.length === 0 && (
+                    <div className="text-center text-zinc-600 text-sm py-8 border border-dashed border-zinc-800 rounded-xl">
+                      소재수집 탭에서 클립을 먼저 담아주세요
+                    </div>
+                  )}
+                  {picked.map((c, idx) => (
+                    <div key={c.id} className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg p-2">
+                      <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-xs font-extrabold ${RANK_BADGE[idx]}`}>
+                        {idx + 1}
+                      </div>
+                      <span className="flex-1 text-sm font-medium truncate">{c.topic}</span>
+                      <button onClick={() => move(idx, -1)} className="p-1 text-zinc-500 disabled:opacity-20" disabled={idx === 0}>
+                        <ArrowUp size={14} />
+                      </button>
+                      <button onClick={() => move(idx, 1)} className="p-1 text-zinc-500 disabled:opacity-20" disabled={idx === picked.length - 1}>
+                        <ArrowDown size={14} />
+                      </button>
+                      <button onClick={() => togglePick(c)} className="p-1 text-zinc-600">
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {renderState === "idle" && (
+                <button
+                  onClick={startRender}
+                  disabled={picked.length === 0}
+                  className="w-full py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-600 flex items-center justify-center gap-2"
+                >
+                  <Play size={16} /> 자동 편집 시작
+                </button>
+              )}
+              {renderState === "rendering" && (
+                <div className="border border-zinc-800 rounded-xl p-3">
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="flex items-center gap-1 text-amber-400"><Clock size={12} /> 편집 서버에서 렌더링 중</span>
+                    <span className="font-mono">{Math.round(progress)}%</span>
+                  </div>
+                  <div className="h-2 bg-zinc-900 rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-400 transition-all" style={{ width: `${progress}%` }} />
+                  </div>
+                </div>
+              )}
+              {renderState === "done" && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold border border-emerald-500/30 bg-emerald-500/10 rounded-xl p-3">
+                    <CheckCircle2 size={16} /> 편집 완료! 발행현황 탭에서 확인하세요
+                  </div>
+                  <button onClick={reset} className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300">
+                    새 영상 만들기
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === "publish" && (
+            <div className="space-y-3">
+              {published.length === 0 && (
+                <div className="text-center text-zinc-600 text-sm py-10 border border-dashed border-zinc-800 rounded-xl">
+                  아직 완성된 영상이 없어요
+                </div>
+              )}
+              {published.map((v) => (
+                <div key={v.id} className="border border-zinc-800 rounded-xl p-3 bg-zinc-900">
+                  <div className="text-sm font-bold mb-1">{v.title}</div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-500">{v.count}개 클립 · TOP{v.count}</span>
+                    {v.status === "편집완료" ? (
+                      <button
+                        onClick={() => publish(v.id)}
+                        className="flex items-center gap-1 text-xs font-bold bg-amber-400 text-zinc-950 px-3 py-1.5 rounded-full"
+                      >
+                        <Upload size={12} /> 유튜브 업로드
+                      </button>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs font-bold text-emerald-400">
+                        <CheckCircle2 size={12} /> 업로드됨
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
