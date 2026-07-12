@@ -25,13 +25,21 @@ export async function GET() {
     const rows: any[] = await res.json();
 
     // VPS(DB) 형태 → 대시보드 화면이 기대하는 형태로 변환
-    const candidates = rows.map((r) => ({
-      id: r.id,
-      topic: r.caption?.trim() || r.keyword || "(제목 없음)",
-      source: r.source,
-      views: formatViews(r.views),
-      thumbHue: hueForId(r.id),
-    }));
+    const candidates = rows.map((r) => {
+      // 틱톡이 lazy-load 전에 주는 1x1 투명 placeholder gif는 진짜 썸네일이 아님 → 걸러냄
+      const rawThumb: string = r.thumbnail_url || "";
+      const thumbnailUrl = rawThumb.startsWith("data:image/gif") ? undefined : rawThumb;
+
+      return {
+        id: r.id,
+        topic: (r.caption?.trim() || r.keyword || "(제목 없음)").slice(0, 120),
+        source: r.source,
+        views: formatViews(r.views),
+        hasViews: !!r.views && r.views > 0,
+        thumbHue: hueForId(r.id),
+        thumbnailUrl,
+      };
+    });
 
     return NextResponse.json(candidates);
   } catch (err) {

@@ -161,7 +161,16 @@ export default function DashboardPage() {
                       picked_ ? "border-amber-400" : "border-zinc-800"
                     }`}
                   >
-                    <div className={`h-24 bg-gradient-to-br ${c.thumbHue} relative flex items-end p-3`}>
+                    <div className={`h-28 relative ${c.thumbnailUrl ? "bg-zinc-900" : `bg-gradient-to-br ${c.thumbHue}`}`}>
+                      {c.thumbnailUrl && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={c.thumbnailUrl}
+                          alt=""
+                          className="absolute inset-0 w-full h-full object-cover"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      )}
                       <div className={`absolute top-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 ${S.cls}`}>
                         <S.icon size={10} /> {S.label}
                       </div>
@@ -170,15 +179,21 @@ export default function DashboardPage() {
                           <Check size={12} strokeWidth={3} />
                         </div>
                       )}
-                      <span className="text-sm font-bold text-white drop-shadow">{c.topic}</span>
                     </div>
-                    <div className="flex items-center justify-between px-3 py-2 bg-zinc-900">
-                      <span className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
-                        <Eye size={12} /> {c.views}
-                      </span>
-                      <span className="text-[11px] text-zinc-500">
-                        {picked_ ? "후보에 담김" : "탭해서 담기"}
-                      </span>
+                    <div className="px-3 py-2 bg-zinc-900">
+                      <p className="text-xs text-zinc-200 leading-snug line-clamp-2 mb-1.5">{c.topic}</p>
+                      <div className="flex items-center justify-between">
+                        {c.hasViews ? (
+                          <span className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
+                            <Eye size={12} /> {c.views}
+                          </span>
+                        ) : (
+                          <span />
+                        )}
+                        <span className="text-[11px] text-zinc-500">
+                          {picked_ ? "후보에 담김" : "탭해서 담기"}
+                        </span>
+                      </div>
                     </div>
                   </button>
                 );
