@@ -143,65 +143,64 @@ export default function DashboardPage() {
 
         <div className="flex-1 px-5 py-5">
           {tab === "collect" && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between text-xs text-zinc-500 mb-1">
+            <div>
+              <div className="flex items-center justify-between text-xs text-zinc-500 mb-3">
                 <span>{loading ? "불러오는 중..." : "봇이 찾은 후보 클립"}</span>
                 <button onClick={loadCandidates} className="flex items-center gap-1 text-amber-400">
                   <RefreshCw size={12} /> 새로고침
                 </button>
               </div>
-              {candidates.map((c) => {
-                const picked_ = picked.find((p) => p.id === c.id);
-                const S = SOURCE_STYLE[c.source];
-                return (
-                  <button
-                    key={c.id}
-                    onClick={() => togglePick(c)}
-                    className={`w-full text-left rounded-xl border overflow-hidden transition-all ${
-                      picked_ ? "border-amber-400" : "border-zinc-800"
-                    }`}
-                  >
-                    <div className={`h-28 relative ${c.thumbnailUrl ? "bg-zinc-900" : `bg-gradient-to-br ${c.thumbHue}`}`}>
-                      {c.thumbnailUrl && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={c.thumbnailUrl}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
-                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
-                        />
-                      )}
-                      <div className={`absolute top-2 left-2 text-[10px] font-bold px-2 py-1 rounded-full border flex items-center gap-1 ${S.cls}`}>
-                        <S.icon size={10} /> {S.label}
+              <div className="grid grid-cols-2 gap-2">
+                {candidates.map((c) => {
+                  const picked_ = picked.find((p) => p.id === c.id);
+                  const S = SOURCE_STYLE[c.source];
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() => togglePick(c)}
+                      className={`aspect-[9/16] relative rounded-xl border overflow-hidden text-left ${
+                        picked_ ? "border-amber-400 ring-2 ring-amber-400/50" : "border-zinc-800"
+                      }`}
+                    >
+                      <div className={`absolute inset-0 ${c.thumbnailUrl ? "bg-zinc-900" : `bg-gradient-to-br ${c.thumbHue}`}`}>
+                        {c.thumbnailUrl && (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={c.thumbnailUrl}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                          />
+                        )}
+                      </div>
+
+                      {/* 위쪽: 출처 배지 + 선택 체크 */}
+                      <div className={`absolute top-1.5 left-1.5 text-[9px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 ${S.cls}`}>
+                        <S.icon size={9} /> {S.label}
                       </div>
                       {picked_ && (
-                        <div className="absolute top-2 right-2 bg-amber-400 text-zinc-950 rounded-full p-1">
-                          <Check size={12} strokeWidth={3} />
+                        <div className="absolute top-1.5 right-1.5 bg-amber-400 text-zinc-950 rounded-full p-1">
+                          <Check size={11} strokeWidth={3} />
                         </div>
                       )}
-                    </div>
-                    <div className="px-3 py-2 bg-zinc-900">
-                      <p className="text-xs text-zinc-200 leading-snug line-clamp-2 mb-1.5">{c.topic}</p>
-                      <div className="flex items-center justify-between">
-                        {c.hasViews ? (
-                          <span className="flex items-center gap-1 text-xs text-zinc-400 font-mono">
-                            <Eye size={12} /> {c.views}
+
+                      {/* 아래쪽: 캡션 + 조회수 (그라데이션 스크림 위) */}
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1.5 px-1.5">
+                        <p className="text-[10px] text-white leading-snug line-clamp-2">{c.topic}</p>
+                        {c.hasViews && (
+                          <span className="flex items-center gap-0.5 text-[9px] text-zinc-300 font-mono mt-1">
+                            <Eye size={9} /> {c.views}
                           </span>
-                        ) : (
-                          <span />
                         )}
-                        <span className="text-[11px] text-zinc-500">
-                          {picked_ ? "후보에 담김" : "탭해서 담기"}
-                        </span>
                       </div>
-                    </div>
-                  </button>
-                );
-              })}
+                    </button>
+                  );
+                })}
+              </div>
               <button
                 onClick={() => setTab("review")}
                 disabled={picked.length === 0}
-                className="w-full mt-2 py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-600"
+                className="w-full mt-3 py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-600"
               >
                 검토·편집으로 ({picked.length}개 담음)
               </button>
