@@ -22,7 +22,7 @@ const RANK_BADGE = [
 ];
 
 export default function DashboardPage() {
-  const [tab, setTab] = useState<"collect" | "review" | "publish">("collect");
+  const [tab, setTab] = useState<"topic" | "collect" | "review" | "publish">("topic");
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [picked, setPicked] = useState<Candidate[]>([]);
   const [title, setTitle] = useState("역대급 파쿠르 실패 반응 랭킹 TOP6");
@@ -32,6 +32,55 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
   const [sortByViews, setSortByViews] = useState(false);
+
+  // ── 주제선택 탭 상태 ──────────────────────────────
+  const [topics, setTopics] = useState<{ title: string; keyword: string }[]>([]);
+  const [topicsLoading, setTopicsLoading] = useState(true);
+  const [producingIdx, setProducingIdx] = useState<number | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<"running" | "done" | "error" | null>(null);
+  const [jobFile, setJobFile] = useState<string | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
+
+  const loadTopics = async () => {
+    setTopicsLoading(true);
+    const res = await fetch("/api/topics");
+    setTopics(await res.json());
+    setTopicsLoading(false);
+  };
+
+  const startProduce = async (idx: number) => {
+    const t = topics[idx];
+    setProducingIdx(idx);
+    setJobStatus("running");
+    setJobFile(null);
+    setJobError(null);
+    const res = await fetch("/api/produce", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: t.title, keyword: t.keyword }),
+    });
+    const data = await res.json();
+    setJobId(data.jobId);
+  };
+
+  useEffect(() => {
+    if (!jobId || jobStatus !== "running") return;
+    const interval = setInterval(async () => {
+      const res = await fetch(`/api/jobs/${jobId}`);
+      const data = await res.json();
+      if (data.status === "done") {
+        setJobStatus("done");
+        setJobFile(data.file);
+        clearInterval(interval);
+      } else if (data.status === "error") {
+        setJobStatus("error");
+        setJobError(data.error || "알 수 없는 오류");
+        clearInterval(interval);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [jobId, jobStatus]);
 
   const loadCandidates = async () => {
     setLoading(true);
@@ -48,6 +97,7 @@ export default function DashboardPage() {
   useEffect(() => {
     loadCandidates();
     loadPublished();
+    loadTopics();
   }, []);
 
   const keywords = Array.from(new Set(candidates.map((c) => c.keyword).filter(Boolean))) as string[];
@@ -125,14 +175,15 @@ export default function DashboardPage() {
 
         <div className="flex px-5 gap-1 pt-3">
           {[
-            { id: "collect" as const, label: "1. 소재수집", badge: candidates.length },
-            { id: "review" as const, label: "2. 검토·편집", badge: picked.length || null },
-            { id: "publish" as const, label: "3. 발행현황", badge: published.length || null },
+            { id: "topic" as const, label: "주제선택", badge: null as number | null },
+            { id: "collect" as const, label: "소재수집", badge: candidates.length },
+            { id: "review" as const, label: "검토편집", badge: picked.length || null },
+            { id: "publish" as const, label: "발행현황", badge: published.length || null },
           ].map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex-1 text-[11px] font-bold py-2.5 rounded-lg border transition-colors ${
+              className={`flex-1 text-[10px] font-bold py-2.5 rounded-lg border transition-colors ${
                 tab === t.id
                   ? "bg-amber-400 text-zinc-950 border-amber-400"
                   : "bg-zinc-900 text-zinc-400 border-zinc-800"
@@ -149,6 +200,91 @@ export default function DashboardPage() {
         </div>
 
         <div className="flex-1 px-5 py-5">
+          {tab === "topic" && (
+            <div>
+              <div className="flex items-center justify-between text-xs text-zinc-500 mb-3">
+                <span>{topicsLoading ? "주제 뽑는 중..." : "오늘 만들어볼 만한 주제"}</span>
+                <button
+                  onClick={loadTopics}
+                  disabled={jobStatus === "running"}
+                  className="flex items-center gap-1 text-amber-400 disabled:opacity-40"
+                >
+                  <RefreshCw size={12} /> 다른 주제
+                </button>
+              </div>
+
+              {jobStatus === null && (
+                <div className="space-y-3">
+                  {topics.map((t, idx) => (
+                    <div key={idx} className="border border-zinc-800 rounded-xl p-4 bg-zinc-900">
+                      <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-bold mb-1.5">
+                        <Sparkles size={11} /> #{t.keyword}
+                      </div>
+                      <p className="text-sm font-bold leading-snug mb-3">{t.title}</p>
+                      <button
+                        onClick={() => startProduce(idx)}
+                        className="w-full py-2.5 rounded-lg font-bold text-xs bg-amber-400 text-zinc-950"
+                      >
+                        이 주제로 만들기
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {jobStatus === "running" && (
+                <div className="border border-zinc-800 rounded-xl p-5 bg-zinc-900 text-center space-y-3">
+                  <p className="text-sm font-bold">{producingIdx !== null ? topics[producingIdx]?.title : ""}</p>
+                  <div className="flex items-center justify-center gap-2 text-amber-400 text-xs">
+                    <Clock size={14} className="animate-pulse" />
+                    틱톡 검색 → 다운로드 → 편집 자동 진행 중...
+                  </div>
+                  <p className="text-[11px] text-zinc-500">보통 1~3분 정도 걸려요, 화면 꺼도 계속 진행돼요</p>
+                </div>
+              )}
+
+              {jobStatus === "done" && jobFile && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold border border-emerald-500/30 bg-emerald-500/10 rounded-xl p-3">
+                    <CheckCircle2 size={16} /> 완성됐어요!
+                  </div>
+                  <video
+                    src={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${jobFile}`}
+                    controls
+                    className="w-full rounded-xl border border-zinc-800"
+                  />
+                  <a
+                    href={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${jobFile}`}
+                    download
+                    className="w-full py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 flex items-center justify-center gap-2"
+                  >
+                    <Upload size={16} className="rotate-180" /> 다운로드
+                  </a>
+                  <button
+                    onClick={() => { setJobStatus(null); setJobId(null); setJobFile(null); loadTopics(); }}
+                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300"
+                  >
+                    다른 주제로 또 만들기
+                  </button>
+                </div>
+              )}
+
+              {jobStatus === "error" && (
+                <div className="space-y-3">
+                  <div className="text-rose-400 text-sm border border-rose-500/30 bg-rose-500/10 rounded-xl p-3">
+                    실패했어요: {jobError}
+                  </div>
+                  <button
+                    onClick={() => { setJobStatus(null); setJobId(null); }}
+                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300"
+                  >
+                    다시 시도
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {tab === "collect" && (
             <div>
               <div className="flex items-center justify-between text-xs text-zinc-500 mb-2">
