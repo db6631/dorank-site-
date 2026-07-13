@@ -35,9 +35,12 @@ export async function GET() {
         topic: (r.caption?.trim() || r.keyword || "(제목 없음)").slice(0, 120),
         source: r.source,
         views: formatViews(r.views),
+        viewCount: r.views || 0,
         hasViews: !!r.views && r.views > 0,
         thumbHue: hueForId(r.id),
         thumbnailUrl,
+        url: r.url || "",
+        keyword: r.keyword || "",
       };
     });
 

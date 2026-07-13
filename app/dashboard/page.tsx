@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import {
   TrendingUp, Check, ArrowUp, ArrowDown, Play, Upload,
-  Sparkles, X, Eye, Music2, Video, RefreshCw, CheckCircle2, Clock
+  Sparkles, X, Eye, Music2, Video, RefreshCw, CheckCircle2, Clock, ExternalLink, ArrowUpDown
 } from "lucide-react";
 import type { Candidate, PublishedVideo } from "@/lib/store";
 
@@ -30,6 +30,8 @@ export default function DashboardPage() {
   const [progress, setProgress] = useState(0);
   const [published, setPublished] = useState<PublishedVideo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
+  const [sortByViews, setSortByViews] = useState(false);
 
   const loadCandidates = async () => {
     setLoading(true);
@@ -47,6 +49,11 @@ export default function DashboardPage() {
     loadCandidates();
     loadPublished();
   }, []);
+
+  const keywords = Array.from(new Set(candidates.map((c) => c.keyword).filter(Boolean))) as string[];
+  const visibleCandidates = candidates
+    .filter((c) => !activeKeyword || c.keyword === activeKeyword)
+    .sort((a, b) => (sortByViews ? b.viewCount - a.viewCount : 0));
 
   const togglePick = (clip: Candidate) => {
     setPicked((prev) => {
@@ -144,21 +151,54 @@ export default function DashboardPage() {
         <div className="flex-1 px-5 py-5">
           {tab === "collect" && (
             <div>
-              <div className="flex items-center justify-between text-xs text-zinc-500 mb-3">
-                <span>{loading ? "불러오는 중..." : "봇이 찾은 후보 클립"}</span>
-                <button onClick={loadCandidates} className="flex items-center gap-1 text-amber-400">
-                  <RefreshCw size={12} /> 새로고침
-                </button>
+              <div className="flex items-center justify-between text-xs text-zinc-500 mb-2">
+                <span>{loading ? "불러오는 중..." : `봇이 찾은 후보 클립 (${visibleCandidates.length})`}</span>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setSortByViews((v) => !v)}
+                    className={`flex items-center gap-1 ${sortByViews ? "text-amber-400" : "text-zinc-500"}`}
+                  >
+                    <ArrowUpDown size={12} /> 조회수순
+                  </button>
+                  <button onClick={loadCandidates} className="flex items-center gap-1 text-amber-400">
+                    <RefreshCw size={12} /> 새로고침
+                  </button>
+                </div>
               </div>
+
+              {keywords.length > 0 && (
+                <div className="flex gap-1.5 overflow-x-auto pb-3 -mx-5 px-5 no-scrollbar">
+                  <button
+                    onClick={() => setActiveKeyword(null)}
+                    className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ${
+                      !activeKeyword ? "bg-amber-400 text-zinc-950 border-amber-400" : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                    }`}
+                  >
+                    전체
+                  </button>
+                  {keywords.map((kw) => (
+                    <button
+                      key={kw}
+                      onClick={() => setActiveKeyword(kw)}
+                      className={`shrink-0 text-[11px] font-bold px-3 py-1.5 rounded-full border ${
+                        activeKeyword === kw ? "bg-amber-400 text-zinc-950 border-amber-400" : "bg-zinc-900 text-zinc-400 border-zinc-800"
+                      }`}
+                    >
+                      #{kw}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-2">
-                {candidates.map((c) => {
+                {visibleCandidates.map((c) => {
                   const picked_ = picked.find((p) => p.id === c.id);
                   const S = SOURCE_STYLE[c.source];
                   return (
-                    <button
+                    <div
                       key={c.id}
                       onClick={() => togglePick(c)}
-                      className={`aspect-[9/16] relative rounded-xl border overflow-hidden text-left ${
+                      className={`aspect-[9/16] relative rounded-xl border overflow-hidden text-left cursor-pointer ${
                         picked_ ? "border-amber-400 ring-2 ring-amber-400/50" : "border-zinc-800"
                       }`}
                     >
@@ -184,8 +224,21 @@ export default function DashboardPage() {
                         </div>
                       )}
 
+                      {/* 오른쪽 아래: 원본 영상 미리보기 버튼 (새 탭, 작은 버튼으로 한정) */}
+                      {c.url && (
+                        <a
+                          href={c.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute bottom-1.5 right-1.5 z-10 bg-black/70 rounded-full p-1.5"
+                        >
+                          <Play size={11} className="text-white" fill="white" />
+                        </a>
+                      )}
+
                       {/* 아래쪽: 캡션 + 조회수 (그라데이션 스크림 위) */}
-                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1.5 px-1.5">
+                      <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-6 pb-1.5 px-1.5 pointer-events-none">
                         <p className="text-[10px] text-white leading-snug line-clamp-2">{c.topic}</p>
                         {c.hasViews && (
                           <span className="flex items-center gap-0.5 text-[9px] text-zinc-300 font-mono mt-1">
@@ -193,7 +246,7 @@ export default function DashboardPage() {
                           </span>
                         )}
                       </div>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
