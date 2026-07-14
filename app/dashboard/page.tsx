@@ -26,21 +26,16 @@ export default function DashboardPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [picked, setPicked] = useState<Candidate[]>([]);
   const [title, setTitle] = useState("역대급 파쿠르 실패 반응 랭킹 TOP6");
-  const [renderState, setRenderState] = useState<"idle" | "rendering" | "done">("idle");
-  const [progress, setProgress] = useState(0);
   const [published, setPublished] = useState<PublishedVideo[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
   const [sortByViews, setSortByViews] = useState(false);
 
-  // ── 주제선택 탭 상태 ──────────────────────────────
+  // ── 주제선택 탭 상태: 이 주제로 스크래핑만 실행 → 소재수집 탭으로 이동 ──
   const [topics, setTopics] = useState<{ title: string; keyword: string }[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(true);
-  const [producingIdx, setProducingIdx] = useState<number | null>(null);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [jobStatus, setJobStatus] = useState<"running" | "done" | "error" | null>(null);
-  const [jobFile, setJobFile] = useState<string | null>(null);
-  const [jobError, setJobError] = useState<string | null>(null);
+  const [scrapingIdx, setScrapingIdx] = useState<number | null>(null);
+  const [scrapeError, setScrapeError] = useState<string | null>(null);
 
   const loadTopics = async () => {
     setTopicsLoading(true);
@@ -49,38 +44,47 @@ export default function DashboardPage() {
     setTopicsLoading(false);
   };
 
-  const startProduce = async (idx: number) => {
-    const t = topics[idx];
-    setProducingIdx(idx);
-    setJobStatus("running");
-    setJobFile(null);
-    setJobError(null);
-    const res = await fetch("/api/produce", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: t.title, keyword: t.keyword }),
-    });
-    const data = await res.json();
-    setJobId(data.jobId);
+  const pollJob = async (id: string): Promise<any> => {
+    while (true) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const res = await fetch(`/api/jobs/${id}`);
+      const data = await res.json();
+      if (data.status === "done" || data.status === "error") return data;
+    }
   };
 
-  useEffect(() => {
-    if (!jobId || jobStatus !== "running") return;
-    const interval = setInterval(async () => {
-      const res = await fetch(`/api/jobs/${jobId}`);
-      const data = await res.json();
-      if (data.status === "done") {
-        setJobStatus("done");
-        setJobFile(data.file);
-        clearInterval(interval);
-      } else if (data.status === "error") {
-        setJobStatus("error");
-        setJobError(data.error || "알 수 없는 오류");
-        clearInterval(interval);
-      }
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [jobId, jobStatus]);
+  const selectTopic = async (idx: number) => {
+    const t = topics[idx];
+    setScrapingIdx(idx);
+    setScrapeError(null);
+    try {
+      const res = await fetch("/api/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: t.keyword }),
+      });
+      const { jobId: sJobId } = await res.json();
+      const result = await pollJob(sJobId);
+      if (result.status === "error") throw new Error(result.error);
+
+      // 스크래핑 끝 → 이 주제 제목을 기본 제목으로, 소재수집 탭으로 이동해서 그 키워드만 보여줌
+      setTitle(t.title);
+      await loadCandidates();
+      setActiveKeyword(t.keyword);
+      setTab("collect");
+    } catch (err) {
+      setScrapeError(String(err));
+    } finally {
+      setScrapingIdx(null);
+    }
+  };
+
+  // ── 검토편집 탭: 실제 렌더링 작업 상태 ──────────────
+  const [renderJobId, setRenderJobId] = useState<string | null>(null);
+  const [renderJobStatus, setRenderJobStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [renderFile, setRenderFile] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
+
 
   const loadCandidates = async () => {
     setLoading(true);
@@ -125,23 +129,26 @@ export default function DashboardPage() {
   };
 
   const startRender = async () => {
-    setRenderState("rendering");
-    setProgress(0);
-    const interval = setInterval(() => {
-      setProgress((p) => Math.min(95, p + Math.random() * 15 + 5));
-    }, 400);
-
-    const res = await fetch("/api/render", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, clipIds: picked.map((p) => p.id) }),
-    });
-    await res.json();
-
-    clearInterval(interval);
-    setProgress(100);
-    setRenderState("done");
-    loadPublished();
+    setRenderJobStatus("running");
+    setRenderFile(null);
+    setRenderError(null);
+    try {
+      const res = await fetch("/api/render", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, clipIds: picked.map((p) => p.id) }),
+      });
+      const { jobId: rJobId } = await res.json();
+      setRenderJobId(rJobId);
+      const result = await pollJob(rJobId);
+      if (result.status === "error") throw new Error(result.error);
+      setRenderFile(result.file);
+      setRenderJobStatus("done");
+      loadPublished();
+    } catch (err) {
+      setRenderError(String(err));
+      setRenderJobStatus("error");
+    }
   };
 
   const publish = async (id: number) => {
@@ -155,8 +162,9 @@ export default function DashboardPage() {
 
   const reset = () => {
     setPicked([]);
-    setRenderState("idle");
-    setProgress(0);
+    setRenderJobStatus("idle");
+    setRenderFile(null);
+    setRenderJobId(null);
     setTab("collect");
   };
 
@@ -206,82 +214,40 @@ export default function DashboardPage() {
                 <span>{topicsLoading ? "주제 뽑는 중..." : "오늘 만들어볼 만한 주제"}</span>
                 <button
                   onClick={loadTopics}
-                  disabled={jobStatus === "running"}
+                  disabled={scrapingIdx !== null}
                   className="flex items-center gap-1 text-amber-400 disabled:opacity-40"
                 >
                   <RefreshCw size={12} /> 다른 주제
                 </button>
               </div>
 
-              {jobStatus === null && (
-                <div className="space-y-3">
-                  {topics.map((t, idx) => (
-                    <div key={idx} className="border border-zinc-800 rounded-xl p-4 bg-zinc-900">
-                      <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-bold mb-1.5">
-                        <Sparkles size={11} /> #{t.keyword}
-                      </div>
-                      <p className="text-sm font-bold leading-snug mb-3">{t.title}</p>
-                      <button
-                        onClick={() => startProduce(idx)}
-                        className="w-full py-2.5 rounded-lg font-bold text-xs bg-amber-400 text-zinc-950"
-                      >
-                        이 주제로 만들기
-                      </button>
+              {scrapeError && (
+                <div className="text-rose-400 text-xs border border-rose-500/30 bg-rose-500/10 rounded-xl p-3 mb-3">
+                  실패했어요: {scrapeError}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                {topics.map((t, idx) => (
+                  <div key={idx} className="border border-zinc-800 rounded-xl p-4 bg-zinc-900">
+                    <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-bold mb-1.5">
+                      <Sparkles size={11} /> #{t.keyword}
                     </div>
-                  ))}
-                </div>
-              )}
-
-              {jobStatus === "running" && (
-                <div className="border border-zinc-800 rounded-xl p-5 bg-zinc-900 text-center space-y-3">
-                  <p className="text-sm font-bold">{producingIdx !== null ? topics[producingIdx]?.title : ""}</p>
-                  <div className="flex items-center justify-center gap-2 text-amber-400 text-xs">
-                    <Clock size={14} className="animate-pulse" />
-                    틱톡 검색 → 다운로드 → 편집 자동 진행 중...
+                    <p className="text-sm font-bold leading-snug mb-3">{t.title}</p>
+                    <button
+                      onClick={() => selectTopic(idx)}
+                      disabled={scrapingIdx !== null}
+                      className="w-full py-2.5 rounded-lg font-bold text-xs bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-600 flex items-center justify-center gap-1.5"
+                    >
+                      {scrapingIdx === idx ? (
+                        <><Clock size={12} className="animate-pulse" /> 틱톡에서 소재 찾는 중...</>
+                      ) : (
+                        "이 주제로 소재 찾기"
+                      )}
+                    </button>
                   </div>
-                  <p className="text-[11px] text-zinc-500">보통 1~3분 정도 걸려요, 화면 꺼도 계속 진행돼요</p>
-                </div>
-              )}
-
-              {jobStatus === "done" && jobFile && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold border border-emerald-500/30 bg-emerald-500/10 rounded-xl p-3">
-                    <CheckCircle2 size={16} /> 완성됐어요!
-                  </div>
-                  <video
-                    src={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${jobFile}`}
-                    controls
-                    className="w-full rounded-xl border border-zinc-800"
-                  />
-                  <a
-                    href={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${jobFile}`}
-                    download
-                    className="w-full py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 flex items-center justify-center gap-2"
-                  >
-                    <Upload size={16} className="rotate-180" /> 다운로드
-                  </a>
-                  <button
-                    onClick={() => { setJobStatus(null); setJobId(null); setJobFile(null); loadTopics(); }}
-                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300"
-                  >
-                    다른 주제로 또 만들기
-                  </button>
-                </div>
-              )}
-
-              {jobStatus === "error" && (
-                <div className="space-y-3">
-                  <div className="text-rose-400 text-sm border border-rose-500/30 bg-rose-500/10 rounded-xl p-3">
-                    실패했어요: {jobError}
-                  </div>
-                  <button
-                    onClick={() => { setJobStatus(null); setJobId(null); }}
-                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300"
-                  >
-                    다시 시도
-                  </button>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
           )}
 
@@ -437,7 +403,7 @@ export default function DashboardPage() {
                 </div>
               </div>
 
-              {renderState === "idle" && (
+              {renderJobStatus === "idle" && (
                 <button
                   onClick={startRender}
                   disabled={picked.length === 0}
@@ -446,24 +412,43 @@ export default function DashboardPage() {
                   <Play size={16} /> 자동 편집 시작
                 </button>
               )}
-              {renderState === "rendering" && (
-                <div className="border border-zinc-800 rounded-xl p-3">
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="flex items-center gap-1 text-amber-400"><Clock size={12} /> 편집 서버에서 렌더링 중</span>
-                    <span className="font-mono">{Math.round(progress)}%</span>
+              {renderJobStatus === "running" && (
+                <div className="border border-zinc-800 rounded-xl p-4 bg-zinc-900 text-center space-y-2">
+                  <div className="flex items-center justify-center gap-2 text-amber-400 text-xs">
+                    <Clock size={14} className="animate-pulse" /> 다운로드 → 자막/효과음 생성 → 편집 진행 중...
                   </div>
-                  <div className="h-2 bg-zinc-900 rounded-full overflow-hidden">
-                    <div className="h-full bg-amber-400 transition-all" style={{ width: `${progress}%` }} />
-                  </div>
+                  <p className="text-[11px] text-zinc-500">보통 1~3분 정도 걸려요, 화면 꺼도 계속 진행돼요</p>
                 </div>
               )}
-              {renderState === "done" && (
+              {renderJobStatus === "done" && renderFile && (
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 text-emerald-400 text-sm font-bold border border-emerald-500/30 bg-emerald-500/10 rounded-xl p-3">
-                    <CheckCircle2 size={16} /> 편집 완료! 발행현황 탭에서 확인하세요
+                    <CheckCircle2 size={16} /> 완성됐어요!
                   </div>
+                  <video
+                    src={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${renderFile}`}
+                    controls
+                    className="w-full rounded-xl border border-zinc-800"
+                  />
+                  <a
+                    href={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${renderFile}`}
+                    download
+                    className="w-full py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 flex items-center justify-center gap-2"
+                  >
+                    <Upload size={16} className="rotate-180" /> 다운로드
+                  </a>
                   <button onClick={reset} className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300">
                     새 영상 만들기
+                  </button>
+                </div>
+              )}
+              {renderJobStatus === "error" && (
+                <div className="space-y-2">
+                  <div className="text-rose-400 text-sm border border-rose-500/30 bg-rose-500/10 rounded-xl p-3">
+                    실패했어요: {renderError}
+                  </div>
+                  <button onClick={() => setRenderJobStatus("idle")} className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300">
+                    다시 시도
                   </button>
                 </div>
               )}
