@@ -44,13 +44,32 @@ export default function DashboardPage() {
     setTopicsLoading(false);
   };
 
-  const pollJob = async (id: string): Promise<any> => {
-    while (true) {
-      await new Promise((r) => setTimeout(r, 3000));
-      const res = await fetch(`/api/jobs/${id}`);
-      const data = await res.json();
-      if (data.status === "done" || data.status === "error") return data;
+  // 네트워크가 잠깐 흔들려도 한 번 더 시도해보는 fetch (모바일 환경 대응)
+  const fetchWithRetry = async (url: string, options?: RequestInit, retries = 2): Promise<Response> => {
+    for (let i = 0; i <= retries; i++) {
+      try {
+        return await fetch(url, options);
+      } catch (err) {
+        if (i === retries) throw err;
+        await new Promise((r) => setTimeout(r, 1500));
+      }
     }
+    throw new Error("네트워크 요청 실패");
+  };
+
+  const pollJob = async (id: string): Promise<any> => {
+    const MAX_ATTEMPTS = 100; // 3초 * 100 = 최대 5분
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      try {
+        const res = await fetch(`/api/jobs/${id}`);
+        const data = await res.json();
+        if (data.status === "done" || data.status === "error") return data;
+      } catch {
+        // 일시적 네트워크 문제는 무시하고 다음 시도에서 계속 (연결 흔들림 대응)
+      }
+    }
+    return { status: "error", error: "시간이 너무 오래 걸려서 중단했어요 (5분 초과)" };
   };
 
   const selectTopic = async (idx: number) => {
@@ -58,7 +77,7 @@ export default function DashboardPage() {
     setScrapingIdx(idx);
     setScrapeError(null);
     try {
-      const res = await fetch("/api/scrape", {
+      const res = await fetchWithRetry("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword: t.keyword }),
@@ -133,7 +152,7 @@ export default function DashboardPage() {
     setRenderFile(null);
     setRenderError(null);
     try {
-      const res = await fetch("/api/render", {
+      const res = await fetchWithRetry("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title, clipIds: picked.map((p) => p.id) }),
@@ -426,12 +445,12 @@ export default function DashboardPage() {
                     <CheckCircle2 size={16} /> 완성됐어요!
                   </div>
                   <video
-                    src={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${renderFile}`}
+                    src={`/api/files/${renderFile}`}
                     controls
                     className="w-full rounded-xl border border-zinc-800"
                   />
                   <a
-                    href={`${process.env.NEXT_PUBLIC_DORANK_FILES_URL ?? ""}/files/${renderFile}`}
+                    href={`/api/files/${renderFile}`}
                     download
                     className="w-full py-3 rounded-xl font-bold text-sm bg-amber-400 text-zinc-950 flex items-center justify-center gap-2"
                   >
