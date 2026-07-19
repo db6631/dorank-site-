@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import {
   TrendingUp, Check, ArrowUp, ArrowDown, Play, Upload,
-  Sparkles, X, Eye, Music2, Video, RefreshCw, CheckCircle2, Clock, ExternalLink, ArrowUpDown
+  Sparkles, X, Eye, Music2, Video, RefreshCw, CheckCircle2, Clock, ExternalLink, ArrowUpDown,
+  Palette, Link2, Plus
 } from "lucide-react";
 import type { Candidate, PublishedVideo } from "@/lib/store";
 
@@ -104,6 +105,50 @@ export default function DashboardPage() {
   const [renderFile, setRenderFile] = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
 
+  // ── 스타일 테마 + 자막 on/off + 링크 직접 추가 ──────────────
+  const [themes, setThemes] = useState<{ id: string; name: string }[]>([]);
+  const [themeId, setThemeId] = useState("gold");
+  const [captionEnabled, setCaptionEnabled] = useState(true);
+  const [linkInput, setLinkInput] = useState("");
+  const [linkAdding, setLinkAdding] = useState(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+
+  const loadThemes = async () => {
+    const res = await fetch("/api/themes");
+    setThemes(await res.json());
+  };
+
+  const addLink = async () => {
+    if (!linkInput.trim()) return;
+    setLinkAdding(true);
+    setLinkError(null);
+    try {
+      const res = await fetchWithRetry("/api/add-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: linkInput.trim() }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const manualClip: Candidate = {
+        id: data.id,
+        topic: "(직접 추가한 링크)",
+        source: data.source,
+        views: "-",
+        viewCount: 0,
+        hasViews: false,
+        thumbHue: "from-zinc-700 to-zinc-950",
+        url: data.url,
+        keyword: "manual",
+      };
+      setPicked((prev) => (prev.length >= 6 ? prev : [...prev, manualClip]));
+      setLinkInput("");
+    } catch (err) {
+      setLinkError(String(err));
+    } finally {
+      setLinkAdding(false);
+    }
+  };
 
   const loadCandidates = async () => {
     setLoading(true);
@@ -121,6 +166,7 @@ export default function DashboardPage() {
     loadCandidates();
     loadPublished();
     loadTopics();
+    loadThemes();
   }, []);
 
   const keywords = Array.from(new Set(candidates.map((c) => c.keyword).filter(Boolean))) as string[];
@@ -155,7 +201,7 @@ export default function DashboardPage() {
       const res = await fetchWithRetry("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, clipIds: picked.map((p) => p.id) }),
+        body: JSON.stringify({ title, clipIds: picked.map((p) => p.id), themeId, captionEnabled }),
       });
       const { jobId: rJobId } = await res.json();
       setRenderJobId(rJobId);
@@ -392,6 +438,64 @@ export default function DashboardPage() {
                   onChange={(e) => setTitle(e.target.value)}
                   className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-amber-400"
                 />
+              </div>
+
+              <div>
+                <label className="text-xs text-zinc-500 flex items-center gap-1 mb-1.5">
+                  <Palette size={12} className="text-amber-400" /> 스타일 테마
+                </label>
+                <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+                  {themes.map((t) => {
+                    const SWATCH: Record<string, string> = {
+                      gold: "from-amber-400 to-rose-600",
+                      neon: "from-fuchsia-500 to-cyan-400",
+                      dark: "from-blue-600 to-blue-300",
+                      pastel: "from-rose-200 to-yellow-200",
+                    };
+                    return (
+                      <button
+                        key={t.id}
+                        onClick={() => setThemeId(t.id)}
+                        className={`shrink-0 flex flex-col items-center gap-1 px-1 ${themeId === t.id ? "" : "opacity-50"}`}
+                      >
+                        <span className={`w-9 h-9 rounded-full bg-gradient-to-br ${SWATCH[t.id] ?? "from-zinc-600 to-zinc-800"} ${themeId === t.id ? "ring-2 ring-amber-400 ring-offset-2 ring-offset-zinc-950" : ""}`} />
+                        <span className="text-[9px] text-zinc-400 whitespace-nowrap">{t.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <button
+                onClick={() => setCaptionEnabled((v) => !v)}
+                className="w-full flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5"
+              >
+                <span className="text-xs text-zinc-300">하단 반응 자막 표시</span>
+                <span className={`w-9 h-5 rounded-full relative transition-colors ${captionEnabled ? "bg-amber-400" : "bg-zinc-700"}`}>
+                  <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${captionEnabled ? "left-4.5" : "left-0.5"}`} style={{ left: captionEnabled ? "18px" : "2px" }} />
+                </span>
+              </button>
+
+              <div>
+                <label className="text-xs text-zinc-500 flex items-center gap-1 mb-1.5">
+                  <Link2 size={12} className="text-amber-400" /> 링크로 직접 추가 (틱톡/유튜브/릴스)
+                </label>
+                <div className="flex gap-1.5">
+                  <input
+                    value={linkInput}
+                    onChange={(e) => setLinkInput(e.target.value)}
+                    placeholder="https://..."
+                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
+                  />
+                  <button
+                    onClick={addLink}
+                    disabled={linkAdding || !linkInput.trim() || picked.length >= 6}
+                    className="px-3 rounded-lg bg-zinc-800 text-amber-400 disabled:opacity-40"
+                  >
+                    <Plus size={16} />
+                  </button>
+                </div>
+                {linkError && <p className="text-[10px] text-rose-400 mt-1">{linkError}</p>}
               </div>
 
               <div>
