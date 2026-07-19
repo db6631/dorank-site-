@@ -73,6 +73,8 @@ export default function DashboardPage() {
     return { status: "error", error: "시간이 너무 오래 걸려서 중단했어요 (5분 초과)" };
   };
 
+  const [resumingScrape, setResumingScrape] = useState<{ jobId: string; title: string; keyword: string } | null>(null);
+
   const selectTopic = async (idx: number) => {
     const t = topics[idx];
     setScrapingIdx(idx);
@@ -84,7 +86,9 @@ export default function DashboardPage() {
         body: JSON.stringify({ keyword: t.keyword }),
       });
       const { jobId: sJobId } = await res.json();
+      localStorage.setItem("dorank_scrape_job", JSON.stringify({ jobId: sJobId, title: t.title, keyword: t.keyword }));
       const result = await pollJob(sJobId);
+      localStorage.removeItem("dorank_scrape_job");
       if (result.status === "error") throw new Error(result.error);
 
       if (!result.count || result.count === 0) {
@@ -98,9 +102,34 @@ export default function DashboardPage() {
       setActiveKeyword(t.keyword);
       setTab("collect");
     } catch (err) {
+      localStorage.removeItem("dorank_scrape_job");
       setScrapeError(String(err));
     } finally {
       setScrapingIdx(null);
+    }
+  };
+
+  // 새로고침 후 이전 작업을 이어서 확인 (스크래핑)
+  const resumeScrapeJob = async (saved: { jobId: string; title: string; keyword: string }) => {
+    setResumingScrape(saved);
+    setScrapeError(null);
+    try {
+      const result = await pollJob(saved.jobId);
+      localStorage.removeItem("dorank_scrape_job");
+      if (result.status === "error") throw new Error(result.error);
+      if (!result.count || result.count === 0) {
+        setScrapeError(`"#${saved.keyword}" 키워드로 찾은 클립이 없어요. "다른 주제"를 눌러서 다시 시도해주세요.`);
+        return;
+      }
+      setTitle(saved.title);
+      await loadCandidates();
+      setActiveKeyword(saved.keyword);
+      setTab("collect");
+    } catch (err) {
+      localStorage.removeItem("dorank_scrape_job");
+      setScrapeError(String(err));
+    } finally {
+      setResumingScrape(null);
     }
   };
 
@@ -172,6 +201,16 @@ export default function DashboardPage() {
     loadPublished();
     loadTopics();
     loadThemes();
+
+    // 화면을 나갔다 다시 들어왔을 때, 아직 안 끝난 작업이 있으면 이어서 확인
+    try {
+      const savedScrape = localStorage.getItem("dorank_scrape_job");
+      if (savedScrape) resumeScrapeJob(JSON.parse(savedScrape));
+      const savedRender = localStorage.getItem("dorank_render_job");
+      if (savedRender) resumeRenderJob(JSON.parse(savedRender));
+    } catch {
+      // 저장된 값이 이상하면 그냥 무시
+    }
   }, []);
 
   const keywords = Array.from(new Set(candidates.map((c) => c.keyword).filter(Boolean))) as string[];
@@ -210,12 +249,35 @@ export default function DashboardPage() {
       });
       const { jobId: rJobId } = await res.json();
       setRenderJobId(rJobId);
+      localStorage.setItem("dorank_render_job", JSON.stringify({ jobId: rJobId, title }));
       const result = await pollJob(rJobId);
+      localStorage.removeItem("dorank_render_job");
       if (result.status === "error") throw new Error(result.error);
       setRenderFile(result.file);
       setRenderJobStatus("done");
       loadPublished();
     } catch (err) {
+      localStorage.removeItem("dorank_render_job");
+      setRenderError(String(err));
+      setRenderJobStatus("error");
+    }
+  };
+
+  // 새로고침 후 이전 편집 작업을 이어서 확인
+  const resumeRenderJob = async (saved: { jobId: string; title: string }) => {
+    setTitle(saved.title);
+    setRenderJobId(saved.jobId);
+    setRenderJobStatus("running");
+    setTab("review");
+    try {
+      const result = await pollJob(saved.jobId);
+      localStorage.removeItem("dorank_render_job");
+      if (result.status === "error") throw new Error(result.error);
+      setRenderFile(result.file);
+      setRenderJobStatus("done");
+      loadPublished();
+    } catch (err) {
+      localStorage.removeItem("dorank_render_job");
       setRenderError(String(err));
       setRenderJobStatus("error");
     }
@@ -290,6 +352,13 @@ export default function DashboardPage() {
                   <RefreshCw size={12} /> 다른 주제
                 </button>
               </div>
+
+              {resumingScrape && (
+                <div className="flex items-center gap-2 text-amber-400 text-xs border border-amber-500/30 bg-amber-500/10 rounded-xl p-3 mb-3">
+                  <Clock size={14} className="animate-pulse" />
+                  이전에 시작한 "{resumingScrape.title}" 작업 이어서 확인 중...
+                </div>
+              )}
 
               {scrapeError && (
                 <div className="text-rose-400 text-xs border border-rose-500/30 bg-rose-500/10 rounded-xl p-3 mb-3">
