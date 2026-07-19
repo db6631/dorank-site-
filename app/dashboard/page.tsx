@@ -87,6 +87,11 @@ export default function DashboardPage() {
       const result = await pollJob(sJobId);
       if (result.status === "error") throw new Error(result.error);
 
+      if (!result.count || result.count === 0) {
+        setScrapeError(`"#${t.keyword}" 키워드로 찾은 클립이 없어요. "다른 주제"를 눌러서 다시 시도해주세요.`);
+        return;
+      }
+
       // 스크래핑 끝 → 이 주제 제목을 기본 제목으로, 소재수집 탭으로 이동해서 그 키워드만 보여줌
       setTitle(t.title);
       await loadCandidates();
