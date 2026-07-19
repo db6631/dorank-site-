@@ -64,6 +64,9 @@ export default function DashboardPage() {
       await new Promise((r) => setTimeout(r, 3000));
       try {
         const res = await fetch(`/api/jobs/${id}`);
+        if (res.status === 404) {
+          return { status: "error", error: "서버가 재시작돼서 작업 기록이 사라졌어요. 다시 시도해주세요." };
+        }
         const data = await res.json();
         if (data.status === "done" || data.status === "error") return data;
       } catch {
