@@ -150,6 +150,44 @@ export default function DashboardPage() {
   const [linkAdding, setLinkAdding] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
 
+  // ── 자막/라벨 미리보기 (렌더링 전에 수정 가능) ──────────────
+  const [labelPreviews, setLabelPreviews] = useState<Record<string, { label: string; caption: string; sfx: string }>>({});
+  const [labelsLoading, setLabelsLoading] = useState(false);
+  const [labelsError, setLabelsError] = useState<string | null>(null);
+
+  const generateLabelPreview = async () => {
+    setLabelsLoading(true);
+    setLabelsError(null);
+    try {
+      const res = await fetchWithRetry("/api/preview-labels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clipIds: picked.map((p) => p.id), title }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      const map: Record<string, { label: string; caption: string; sfx: string }> = {};
+      for (const item of data) map[item.id] = { label: item.label, caption: item.caption, sfx: item.sfx };
+      setLabelPreviews(map);
+    } catch (err) {
+      setLabelsError(String(err));
+    } finally {
+      setLabelsLoading(false);
+    }
+  };
+
+  const updateLabelPreview = (id: string, field: "label" | "caption", value: string) => {
+    setLabelPreviews((prev) => ({ ...prev, [id]: { ...prev[id], [field]: value } }));
+  };
+
+  // ── 클립별 시작시점/길이 조절 ──────────────
+  const [clipTrims, setClipTrims] = useState<Record<string, { startSec: number; durationSec: number }>>({});
+  const getTrim = (id: string) => clipTrims[id] ?? { startSec: 0.5, durationSec: 5 };
+  const setTrim = (id: string, field: "startSec" | "durationSec", value: number) => {
+    setClipTrims((prev) => ({ ...prev, [id]: { ...getTrim(id), [field]: value } }));
+  };
+
+
   const loadThemes = async () => {
     const res = await fetch("/api/themes");
     setThemes(await res.json());
@@ -245,10 +283,20 @@ export default function DashboardPage() {
     setRenderFile(null);
     setRenderError(null);
     try {
+      const clips = picked.map((p) => {
+        const trim = getTrim(p.id);
+        const preview = labelPreviews[p.id];
+        return {
+          id: p.id,
+          startSec: trim.startSec,
+          durationSec: trim.durationSec,
+          ...(preview ? { label: preview.label, caption: preview.caption, sfx: preview.sfx } : {}),
+        };
+      });
       const res = await fetchWithRetry("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, clipIds: picked.map((p) => p.id), themeId, captionEnabled }),
+        body: JSON.stringify({ title, clips, themeId, captionEnabled }),
       });
       const { jobId: rJobId } = await res.json();
       setRenderJobId(rJobId);
@@ -300,6 +348,8 @@ export default function DashboardPage() {
     setRenderJobStatus("idle");
     setRenderFile(null);
     setRenderJobId(null);
+    setLabelPreviews({});
+    setClipTrims({});
     setTab("collect");
   };
 
@@ -576,30 +626,83 @@ export default function DashboardPage() {
               </div>
 
               <div>
-                <div className="text-xs text-zinc-500 mb-2">순위 순서 (위/아래로 조정)</div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-zinc-500">순위 순서 (위/아래로 조정)</span>
+                  <button
+                    onClick={generateLabelPreview}
+                    disabled={picked.length === 0 || labelsLoading}
+                    className="flex items-center gap-1 text-[11px] font-bold text-amber-400 disabled:opacity-40"
+                  >
+                    <Sparkles size={11} className={labelsLoading ? "animate-pulse" : ""} />
+                    {labelsLoading ? "생성 중..." : "AI 자막 미리보기"}
+                  </button>
+                </div>
+                {labelsError && <p className="text-[10px] text-rose-400 mb-2">{labelsError}</p>}
                 <div className="space-y-2">
                   {picked.length === 0 && (
                     <div className="text-center text-zinc-600 text-sm py-8 border border-dashed border-zinc-800 rounded-xl">
                       소재수집 탭에서 클립을 먼저 담아주세요
                     </div>
                   )}
-                  {picked.map((c, idx) => (
-                    <div key={c.id} className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg p-2">
-                      <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-xs font-extrabold ${RANK_BADGE[idx]}`}>
-                        {idx + 1}
+                  {picked.map((c, idx) => {
+                    const trim = getTrim(c.id);
+                    const preview = labelPreviews[c.id];
+                    return (
+                      <div key={c.id} className="bg-zinc-900 border border-zinc-800 rounded-lg p-2 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-xs font-extrabold ${RANK_BADGE[idx]}`}>
+                            {idx + 1}
+                          </div>
+                          <span className="flex-1 text-sm font-medium truncate">{c.topic}</span>
+                          <button onClick={() => move(idx, -1)} className="p-1 text-zinc-500 disabled:opacity-20" disabled={idx === 0}>
+                            <ArrowUp size={14} />
+                          </button>
+                          <button onClick={() => move(idx, 1)} className="p-1 text-zinc-500 disabled:opacity-20" disabled={idx === picked.length - 1}>
+                            <ArrowDown size={14} />
+                          </button>
+                          <button onClick={() => togglePick(c)} className="p-1 text-zinc-600">
+                            <X size={14} />
+                          </button>
+                        </div>
+
+                        <div className="flex items-center gap-2 pl-9 text-[10px] text-zinc-500">
+                          <label className="flex items-center gap-1">
+                            시작
+                            <input
+                              type="number" step="0.5" min="0" value={trim.startSec}
+                              onChange={(e) => setTrim(c.id, "startSec", Number(e.target.value))}
+                              className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 py-0.5 text-zinc-200"
+                            />초
+                          </label>
+                          <label className="flex items-center gap-1">
+                            길이
+                            <input
+                              type="number" step="0.5" min="1" value={trim.durationSec}
+                              onChange={(e) => setTrim(c.id, "durationSec", Number(e.target.value))}
+                              className="w-12 bg-zinc-950 border border-zinc-800 rounded px-1 py-0.5 text-zinc-200"
+                            />초
+                          </label>
+                        </div>
+
+                        {preview && (
+                          <div className="pl-9 space-y-1">
+                            <input
+                              value={preview.label}
+                              onChange={(e) => updateLabelPreview(c.id, "label", e.target.value)}
+                              placeholder="순위 라벨"
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] text-amber-300 font-bold"
+                            />
+                            <input
+                              value={preview.caption}
+                              onChange={(e) => updateLabelPreview(c.id, "caption", e.target.value)}
+                              placeholder="반응 자막"
+                              className="w-full bg-zinc-950 border border-zinc-800 rounded px-2 py-1 text-[11px] text-zinc-300"
+                            />
+                          </div>
+                        )}
                       </div>
-                      <span className="flex-1 text-sm font-medium truncate">{c.topic}</span>
-                      <button onClick={() => move(idx, -1)} className="p-1 text-zinc-500 disabled:opacity-20" disabled={idx === 0}>
-                        <ArrowUp size={14} />
-                      </button>
-                      <button onClick={() => move(idx, 1)} className="p-1 text-zinc-500 disabled:opacity-20" disabled={idx === picked.length - 1}>
-                        <ArrowDown size={14} />
-                      </button>
-                      <button onClick={() => togglePick(c)} className="p-1 text-zinc-600">
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
 
@@ -637,8 +740,14 @@ export default function DashboardPage() {
                   >
                     <Upload size={16} className="rotate-180" /> 다운로드
                   </a>
+                  <button
+                    onClick={() => { setRenderJobStatus("idle"); setRenderFile(null); setRenderJobId(null); }}
+                    className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-800 border border-zinc-700 text-amber-400"
+                  >
+                    이대로 다시 수정하기
+                  </button>
                   <button onClick={reset} className="w-full py-2.5 rounded-xl text-sm font-bold bg-zinc-900 border border-zinc-800 text-zinc-300">
-                    새 영상 만들기
+                    완전히 새 영상 만들기
                   </button>
                 </div>
               )}

@@ -5,10 +5,13 @@ export async function POST(req: Request) {
   const body = await req.json();
 
   if (!apiUrl) {
-    return NextResponse.json({ jobId: `mock_${Date.now()}` });
+    const items = (body.clipIds || []).map((id: string) => ({
+      id, label: "예시라벨", caption: "예시 반응 자막이에요", sfx: "impact",
+    }));
+    return NextResponse.json(items);
   }
 
-  const res = await fetch(`${apiUrl}/render`, {
+  const res = await fetch(`${apiUrl}/preview-labels`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -18,7 +21,7 @@ export async function POST(req: Request) {
   });
 
   if (!res.ok) {
-    return NextResponse.json({ error: "렌더링 요청 실패" }, { status: 500 });
+    return NextResponse.json({ error: "자막 미리보기 생성 실패" }, { status: 500 });
   }
   return NextResponse.json(await res.json());
 }
