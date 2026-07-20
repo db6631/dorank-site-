@@ -74,13 +74,17 @@ export default function DashboardPage() {
     return { status: "error", error: "시간이 너무 오래 걸려서 중단했어요 (5분 초과)" };
   };
 
-  // 주제 3개를 뽑는데, 뒤에서 실제로 스크래핑까지 미리 해보고 검증된 것만 받아옴
-  const loadTopics = async () => {
+  // 주제 뽑기: 첫 로드는 캐시라 즉시 뜨고, force=true(다른 주제 버튼)면 새로 검증
+  const loadTopics = async (force = false) => {
     setTopicsLoading(true);
     setTopicsError(null);
-    setTopicsProgress("주제 후보 고르는 중...");
+    setTopicsProgress(force ? "새 주제 검증 중... (1~2분 걸릴 수 있어요)" : "주제 불러오는 중...");
     try {
-      const res = await fetchWithRetry("/api/topics/generate", { method: "POST" });
+      const res = await fetchWithRetry("/api/topics/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force }),
+      });
       const { jobId } = await res.json();
       const result = await pollJob(jobId, setTopicsProgress);
       if (result.status === "error") throw new Error(result.error);
@@ -460,7 +464,7 @@ export default function DashboardPage() {
               <div className="flex items-center justify-between text-xs text-zinc-500 mb-3">
                 <span>오늘 만들어볼 만한 주제</span>
                 <button
-                  onClick={loadTopics}
+                  onClick={() => loadTopics(true)}
                   disabled={topicsLoading}
                   className="flex items-center gap-1 text-amber-400 disabled:opacity-40"
                 >
