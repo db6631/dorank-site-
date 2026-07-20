@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import {
   TrendingUp, Check, ArrowUp, ArrowDown, Play, Upload,
   Sparkles, X, Eye, Music2, Video, RefreshCw, CheckCircle2, Clock, ExternalLink, ArrowUpDown,
-  Palette, Link2, Plus
+  Palette, Link2, Plus, Star, Search
 } from "lucide-react";
 import type { Candidate, PublishedVideo } from "@/lib/store";
 
@@ -32,18 +32,15 @@ export default function DashboardPage() {
   const [activeKeyword, setActiveKeyword] = useState<string | null>(null);
   const [sortByViews, setSortByViews] = useState(false);
 
-  // ── 주제선택 탭 상태: 이 주제로 스크래핑만 실행 → 소재수집 탭으로 이동 ──
-  const [topics, setTopics] = useState<{ title: string; keyword: string }[]>([]);
+  // ── 주제선택 탭 상태 ──────────────────────────────
+  const [topics, setTopics] = useState<{ title: string; keyword: string; verifiedCount: number }[]>([]);
   const [topicsLoading, setTopicsLoading] = useState(true);
-  const [scrapingIdx, setScrapingIdx] = useState<number | null>(null);
+  const [topicsProgress, setTopicsProgress] = useState("");
+  const [topicsError, setTopicsError] = useState<string | null>(null);
+  const [selectingIdx, setSelectingIdx] = useState<number | null>(null);
+  const [favorites, setFavorites] = useState<{ id: number; title: string; keyword: string }[]>([]);
+  const [searchInput, setSearchInput] = useState("");
   const [scrapeError, setScrapeError] = useState<string | null>(null);
-
-  const loadTopics = async () => {
-    setTopicsLoading(true);
-    const res = await fetch("/api/topics");
-    setTopics(await res.json());
-    setTopicsLoading(false);
-  };
 
   // 네트워크가 잠깐 흔들려도 한 번 더 시도해보는 fetch (모바일 환경 대응)
   const fetchWithRetry = async (url: string, options?: RequestInit, retries = 2): Promise<Response> => {
@@ -58,7 +55,7 @@ export default function DashboardPage() {
     throw new Error("네트워크 요청 실패");
   };
 
-  const pollJob = async (id: string): Promise<any> => {
+  const pollJob = async (id: string, onProgress?: (msg: string) => void): Promise<any> => {
     const MAX_ATTEMPTS = 100; // 3초 * 100 = 최대 5분
     for (let i = 0; i < MAX_ATTEMPTS; i++) {
       await new Promise((r) => setTimeout(r, 3000));
@@ -68,6 +65,7 @@ export default function DashboardPage() {
           return { status: "error", error: "서버가 재시작돼서 작업 기록이 사라졌어요. 다시 시도해주세요." };
         }
         const data = await res.json();
+        if (data.progress) onProgress?.(data.progress);
         if (data.status === "done" || data.status === "error") return data;
       } catch {
         // 일시적 네트워크 문제는 무시하고 다음 시도에서 계속 (연결 흔들림 대응)
@@ -76,63 +74,108 @@ export default function DashboardPage() {
     return { status: "error", error: "시간이 너무 오래 걸려서 중단했어요 (5분 초과)" };
   };
 
-  const [resumingScrape, setResumingScrape] = useState<{ jobId: string; title: string; keyword: string } | null>(null);
+  // 주제 3개를 뽑는데, 뒤에서 실제로 스크래핑까지 미리 해보고 검증된 것만 받아옴
+  const loadTopics = async () => {
+    setTopicsLoading(true);
+    setTopicsError(null);
+    setTopicsProgress("주제 후보 고르는 중...");
+    try {
+      const res = await fetchWithRetry("/api/topics/generate", { method: "POST" });
+      const { jobId } = await res.json();
+      const result = await pollJob(jobId, setTopicsProgress);
+      if (result.status === "error") throw new Error(result.error);
+      setTopics(result.topics ?? []);
+    } catch (err) {
+      setTopicsError(String(err));
+    } finally {
+      setTopicsLoading(false);
+    }
+  };
 
+  const loadFavorites = async () => {
+    const res = await fetch("/api/favorites");
+    setFavorites(await res.json());
+  };
+
+  const addFavorite = async (t: { title: string; keyword: string }) => {
+    await fetch("/api/favorites", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(t),
+    });
+    loadFavorites();
+  };
+
+  const removeFavorite = async (id: number) => {
+    await fetch(`/api/favorites/${id}`, { method: "DELETE" });
+    loadFavorites();
+  };
+
+  // 이미 검증(사전 스크래핑) 끝난 주제라서 바로 소재수집으로 이동만 하면 됨 - 대기시간 거의 없음
   const selectTopic = async (idx: number) => {
     const t = topics[idx];
-    setScrapingIdx(idx);
+    setSelectingIdx(idx);
+    setTitle(t.title);
+    await loadCandidates();
+    setActiveKeyword(t.keyword);
+    setTab("collect");
+    setSelectingIdx(null);
+  };
+
+  // 즐겨찾기는 예전에 저장해둔 거라 최신 소재인지 다시 한번 확인(재검색)하고 이동
+  const selectFavorite = async (fav: { title: string; keyword: string }) => {
     setScrapeError(null);
+    setTopicsLoading(true);
+    setTopicsProgress(`"${fav.title}" 최신 소재 확인 중...`);
     try {
       const res = await fetchWithRetry("/api/scrape", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword: t.keyword }),
+        body: JSON.stringify({ keyword: fav.keyword }),
       });
-      const { jobId: sJobId } = await res.json();
-      localStorage.setItem("dorank_scrape_job", JSON.stringify({ jobId: sJobId, title: t.title, keyword: t.keyword }));
-      const result = await pollJob(sJobId);
-      localStorage.removeItem("dorank_scrape_job");
+      const { jobId } = await res.json();
+      const result = await pollJob(jobId);
       if (result.status === "error") throw new Error(result.error);
-
-      if (!result.count || result.count === 0) {
-        setScrapeError(`"#${t.keyword}" 키워드로 찾은 클립이 없어요. "다른 주제"를 눌러서 다시 시도해주세요.`);
-        return;
-      }
-
-      // 스크래핑 끝 → 이 주제 제목을 기본 제목으로, 소재수집 탭으로 이동해서 그 키워드만 보여줌
-      setTitle(t.title);
+      setTitle(fav.title);
       await loadCandidates();
-      setActiveKeyword(t.keyword);
+      setActiveKeyword(fav.keyword);
       setTab("collect");
     } catch (err) {
-      localStorage.removeItem("dorank_scrape_job");
       setScrapeError(String(err));
     } finally {
-      setScrapingIdx(null);
+      setTopicsLoading(false);
     }
   };
 
-  // 새로고침 후 이전 작업을 이어서 확인 (스크래핑)
-  const resumeScrapeJob = async (saved: { jobId: string; title: string; keyword: string }) => {
-    setResumingScrape(saved);
+  // 직접 검색어 입력해서 바로 찾기
+  const searchByKeyword = async () => {
+    const kw = searchInput.trim().replace(/^#/, "");
+    if (!kw) return;
     setScrapeError(null);
+    setTopicsLoading(true);
+    setTopicsProgress(`"#${kw}" 검색 중...`);
     try {
-      const result = await pollJob(saved.jobId);
-      localStorage.removeItem("dorank_scrape_job");
+      const res = await fetchWithRetry("/api/scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: kw }),
+      });
+      const { jobId } = await res.json();
+      const result = await pollJob(jobId);
       if (result.status === "error") throw new Error(result.error);
-      if (!result.count || result.count === 0) {
-        setScrapeError(`"#${saved.keyword}" 키워드로 찾은 클립이 없어요. "다른 주제"를 눌러서 다시 시도해주세요.`);
+      if (!result.count) {
+        setScrapeError(`"#${kw}" 로 찾은 클립이 없어요. 다른 검색어로 시도해주세요.`);
         return;
       }
-      setTitle(saved.title);
+      setTitle(`역대급 ${kw} TOP6`);
       await loadCandidates();
-      setActiveKeyword(saved.keyword);
+      setActiveKeyword(kw);
       setTab("collect");
+      setSearchInput("");
     } catch (err) {
-      localStorage.removeItem("dorank_scrape_job");
       setScrapeError(String(err));
     } finally {
-      setResumingScrape(null);
+      setTopicsLoading(false);
     }
   };
 
@@ -242,11 +285,10 @@ export default function DashboardPage() {
     loadPublished();
     loadTopics();
     loadThemes();
+    loadFavorites();
 
-    // 화면을 나갔다 다시 들어왔을 때, 아직 안 끝난 작업이 있으면 이어서 확인
+    // 화면을 나갔다 다시 들어왔을 때, 아직 안 끝난 편집 작업이 있으면 이어서 확인
     try {
-      const savedScrape = localStorage.getItem("dorank_scrape_job");
-      if (savedScrape) resumeScrapeJob(JSON.parse(savedScrape));
       const savedRender = localStorage.getItem("dorank_render_job");
       if (savedRender) resumeRenderJob(JSON.parse(savedRender));
     } catch {
@@ -395,50 +437,96 @@ export default function DashboardPage() {
         <div className="flex-1 px-5 py-5">
           {tab === "topic" && (
             <div>
+              {favorites.length > 0 && (
+                <div className="mb-4">
+                  <div className="text-xs text-zinc-500 mb-2 flex items-center gap-1">
+                    <Star size={11} className="text-amber-400" fill="currentColor" /> 즐겨찾기
+                  </div>
+                  <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
+                    {favorites.map((f) => (
+                      <div key={f.id} className="shrink-0 flex items-center gap-1 bg-zinc-900 border border-zinc-800 rounded-full pl-3 pr-1 py-1">
+                        <button onClick={() => selectFavorite(f)} className="text-[11px] text-zinc-200 font-bold whitespace-nowrap">
+                          {f.title}
+                        </button>
+                        <button onClick={() => removeFavorite(f.id)} className="p-1 text-zinc-600">
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between text-xs text-zinc-500 mb-3">
-                <span>{topicsLoading ? "주제 뽑는 중..." : "오늘 만들어볼 만한 주제"}</span>
+                <span>오늘 만들어볼 만한 주제</span>
                 <button
                   onClick={loadTopics}
-                  disabled={scrapingIdx !== null}
+                  disabled={topicsLoading}
                   className="flex items-center gap-1 text-amber-400 disabled:opacity-40"
                 >
-                  <RefreshCw size={12} /> 다른 주제
+                  <RefreshCw size={12} className={topicsLoading ? "animate-spin" : ""} /> 다른 주제
                 </button>
               </div>
 
-              {resumingScrape && (
+              {topicsLoading && (
                 <div className="flex items-center gap-2 text-amber-400 text-xs border border-amber-500/30 bg-amber-500/10 rounded-xl p-3 mb-3">
-                  <Clock size={14} className="animate-pulse" />
-                  이전에 시작한 "{resumingScrape.title}" 작업 이어서 확인 중...
+                  <Clock size={14} className="animate-pulse shrink-0" />
+                  <span>{topicsProgress || "확인 중..."}</span>
                 </div>
               )}
 
-              {scrapeError && (
+              {(topicsError || scrapeError) && (
                 <div className="text-rose-400 text-xs border border-rose-500/30 bg-rose-500/10 rounded-xl p-3 mb-3">
-                  실패했어요: {scrapeError}
+                  실패했어요: {topicsError || scrapeError}
                 </div>
               )}
 
-              <div className="space-y-3">
-                {topics.map((t, idx) => (
-                  <div key={idx} className="border border-zinc-800 rounded-xl p-4 bg-zinc-900">
-                    <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-bold mb-1.5">
-                      <Sparkles size={11} /> #{t.keyword}
+              {!topicsLoading && (
+                <div className="space-y-3">
+                  {topics.map((t, idx) => (
+                    <div key={idx} className="border border-zinc-800 rounded-xl p-4 bg-zinc-900">
+                      <div className="flex items-center justify-between mb-1.5">
+                        <div className="flex items-center gap-1.5 text-[10px] text-amber-400 font-bold">
+                          <Sparkles size={11} /> #{t.keyword}
+                          <span className="text-zinc-500 font-normal">· 소재 {t.verifiedCount}개 확인됨</span>
+                        </div>
+                        <button onClick={() => addFavorite(t)} className="text-zinc-600 hover:text-amber-400 p-1">
+                          <Star size={14} />
+                        </button>
+                      </div>
+                      <p className="text-sm font-bold leading-snug mb-3">{t.title}</p>
+                      <button
+                        onClick={() => selectTopic(idx)}
+                        disabled={selectingIdx !== null}
+                        className="w-full py-2.5 rounded-lg font-bold text-xs bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-600"
+                      >
+                        이 주제로 소재 보기
+                      </button>
                     </div>
-                    <p className="text-sm font-bold leading-snug mb-3">{t.title}</p>
-                    <button
-                      onClick={() => selectTopic(idx)}
-                      disabled={scrapingIdx !== null}
-                      className="w-full py-2.5 rounded-lg font-bold text-xs bg-amber-400 text-zinc-950 disabled:bg-zinc-800 disabled:text-zinc-600 flex items-center justify-center gap-1.5"
-                    >
-                      {scrapingIdx === idx ? (
-                        <><Clock size={12} className="animate-pulse" /> 틱톡에서 소재 찾는 중...</>
-                      ) : (
-                        "이 주제로 소재 찾기"
-                      )}
-                    </button>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-4 pt-4 border-t border-zinc-900">
+                <div className="text-xs text-zinc-500 mb-1.5 flex items-center gap-1">
+                  <Search size={11} /> 직접 검색어로 찾기
+                </div>
+                <div className="flex gap-1.5">
+                  <input
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && searchByKeyword()}
+                    placeholder="예: catsoftiktok"
+                    className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
+                  />
+                  <button
+                    onClick={searchByKeyword}
+                    disabled={topicsLoading || !searchInput.trim()}
+                    className="px-3 rounded-lg bg-zinc-800 text-amber-400 disabled:opacity-40"
+                  >
+                    <Search size={16} />
+                  </button>
+                </div>
               </div>
             </div>
           )}
