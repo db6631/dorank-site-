@@ -858,29 +858,37 @@ export default function DashboardPage() {
 
           {tab === "publish" && (
             <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs text-zinc-500">
+                <span>완성된 영상 ({published.length})</span>
+                <button onClick={loadPublished} className="flex items-center gap-1 text-amber-400">
+                  <RefreshCw size={12} /> 새로고침
+                </button>
+              </div>
               {published.length === 0 && (
                 <div className="text-center text-zinc-600 text-sm py-10 border border-dashed border-zinc-800 rounded-xl">
                   아직 완성된 영상이 없어요
                 </div>
               )}
-              {published.map((v) => (
-                <div key={v.id} className="border border-zinc-800 rounded-xl p-3 bg-zinc-900">
-                  <div className="text-sm font-bold mb-1">{v.title}</div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs text-zinc-500">{v.count}개 클립 · TOP{v.count}</span>
-                    {v.status === "편집완료" ? (
-                      <button
-                        onClick={() => publish(v.id)}
-                        className="flex items-center gap-1 text-xs font-bold bg-amber-400 text-zinc-950 px-3 py-1.5 rounded-full"
+              {published.map((v: any) => (
+                <div key={v.id} className="border border-zinc-800 rounded-xl p-3 bg-zinc-900 space-y-2">
+                  <div className="text-sm font-bold">{v.title}</div>
+                  {v.file && (
+                    <>
+                      <video
+                        src={`/api/files/${v.file}`}
+                        controls
+                        preload="metadata"
+                        className="w-full rounded-lg border border-zinc-800"
+                      />
+                      <a
+                        href={`/api/files/${v.file}`}
+                        download
+                        className="w-full py-2.5 rounded-lg font-bold text-xs bg-amber-400 text-zinc-950 flex items-center justify-center gap-1.5"
                       >
-                        <Upload size={12} /> 유튜브 업로드
-                      </button>
-                    ) : (
-                      <span className="flex items-center gap-1 text-xs font-bold text-emerald-400">
-                        <CheckCircle2 size={12} /> 업로드됨
-                      </span>
-                    )}
-                  </div>
+                        <Upload size={12} className="rotate-180" /> 다운로드
+                      </a>
+                    </>
+                  )}
                 </div>
               ))}
             </div>
