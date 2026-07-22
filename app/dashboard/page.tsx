@@ -1,12 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type FC } from "react";
 import {
   TrendingUp, Check, ArrowUp, ArrowDown, Play, Upload,
   Sparkles, X, Eye, Music2, Video, RefreshCw, CheckCircle2, Clock, ExternalLink, ArrowUpDown,
   Palette, Link2, Plus, Star, Search
 } from "lucide-react";
 import type { Candidate, PublishedVideo } from "@/lib/store";
+import { Player } from "@remotion/player";
+import { RankingVideo, FPS, type RankingProps } from "@/lib/remotion/RankingVideo";
+
+// @remotion/player의 <Player>는 props 타입을 Record<string, unknown>으로 요구해서 감싸줌
+const PreviewComposition: FC<Record<string, unknown>> = (props) => (
+  <RankingVideo {...(props as unknown as RankingProps)} />
+);
 
 const SOURCE_STYLE = {
   tiktok: { label: "TikTok", icon: Music2, cls: "text-rose-400 bg-rose-500/10 border-rose-500/30" },
@@ -232,6 +239,40 @@ export default function DashboardPage() {
   const getTrim = (id: string) => clipTrims[id] ?? { startSec: 0.5, durationSec: 5 };
   const setTrim = (id: string, field: "startSec" | "durationSec", value: number) => {
     setClipTrims((prev) => ({ ...prev, [id]: { ...getTrim(id), [field]: value } }));
+  };
+
+  // ── 실시간 미리보기 (렌더링 전에 브라우저에서 바로 재생) ──────────────
+  const [previewProps, setPreviewProps] = useState<RankingProps | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  const loadPreview = async () => {
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const clips = picked.map((p) => {
+        const trim = getTrim(p.id);
+        const preview = labelPreviews[p.id];
+        return {
+          id: p.id,
+          startSec: trim.startSec,
+          durationSec: trim.durationSec,
+          ...(preview ? { label: preview.label, caption: preview.caption, sfx: preview.sfx } : {}),
+        };
+      });
+      const res = await fetchWithRetry("/api/preview-clips", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, clips, themeId, captionEnabled }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setPreviewProps(data as RankingProps);
+    } catch (err) {
+      setPreviewError(String(err));
+    } finally {
+      setPreviewLoading(false);
+    }
   };
 
 
@@ -796,6 +837,49 @@ export default function DashboardPage() {
                     );
                   })}
                 </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs text-zinc-500">실시간 미리보기</span>
+                  <button
+                    onClick={loadPreview}
+                    disabled={picked.length === 0 || previewLoading}
+                    className="flex items-center gap-1 text-[11px] font-bold text-amber-400 disabled:opacity-40"
+                  >
+                    <Eye size={11} className={previewLoading ? "animate-pulse" : ""} />
+                    {previewLoading ? "클립 준비 중..." : previewProps ? "새로고침" : "미리보기 보기"}
+                  </button>
+                </div>
+                {previewError && <p className="text-[10px] text-rose-400 mb-2">{previewError}</p>}
+                {previewLoading && (
+                  <div className="text-center text-zinc-600 text-xs py-8 border border-dashed border-zinc-800 rounded-xl">
+                    클립 다운로드 + 자막 생성 중이에요, 처음엔 시간이 좀 걸려요...
+                  </div>
+                )}
+                {!previewLoading && previewProps && (
+                  <div className="rounded-xl overflow-hidden border border-zinc-800 mx-auto" style={{ maxWidth: 260 }}>
+                    <Player
+                      component={PreviewComposition}
+                      inputProps={previewProps as unknown as Record<string, unknown>}
+                      durationInFrames={Math.max(
+                        1,
+                        Math.round(previewProps.clips.reduce((sum, c) => sum + c.durationSec, 0) * FPS)
+                      )}
+                      compositionWidth={1080}
+                      compositionHeight={1920}
+                      fps={FPS}
+                      style={{ width: "100%" }}
+                      controls
+                      loop
+                    />
+                  </div>
+                )}
+                {!previewLoading && !previewProps && (
+                  <div className="text-center text-zinc-600 text-xs py-8 border border-dashed border-zinc-800 rounded-xl">
+                    {picked.length === 0 ? "소재수집 탭에서 클립을 먼저 담아주세요" : "위 버튼을 눌러 실제 영상으로 미리보기해보세요"}
+                  </div>
+                )}
               </div>
 
               {renderJobStatus === "idle" && (
