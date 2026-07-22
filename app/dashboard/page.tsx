@@ -342,7 +342,7 @@ export default function DashboardPage() {
       const res = await fetchWithRetry("/api/render", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, clips, themeId, captionEnabled }),
+        body: JSON.stringify({ title, clips, themeId, captionEnabled, engine: "remotion" }),
       });
       const { jobId: rJobId } = await res.json();
       setRenderJobId(rJobId);
