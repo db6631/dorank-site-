@@ -55,6 +55,7 @@ export const RankingVideo: React.FC<RankingProps> = ({ title, clips, theme, capt
           <OffthreadVideo
             src={c.videoUrl}
             startFrom={Math.round(c.startSec * fps)}
+            delayRenderTimeoutInMilliseconds={60000}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
           {c.sfxPath && <Audio src={c.sfxPath} volume={0.55} />}
